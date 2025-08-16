@@ -149,6 +149,7 @@ class ConcreteApp(tk.Tk):
         construction_frame = ttk.LabelFrame(right_panel, text="Контроль", padding=10)
         construction_frame.pack(fill=tk.BOTH, expand=True)
         
+    
         #################### Кнопки управления ##########################
         btn_frame = ttk.LabelFrame(self.left_panel, text="Действия", padding=5)
         btn_frame.pack(fill=tk.X, pady=5)
@@ -668,9 +669,9 @@ class ConcreteApp(tk.Tk):
 
         ############ удаление данных контроля ############
     def delete_construction(self):
-        selected = self.construction_tree.selection()
+        selected = self.get_selected_constructions()  # Используем метод для получения выбранных записей
         if not selected:
-            messagebox.showwarning("Ошибка", "Выберите контроль для удаления")
+            messagebox.showwarning("Ошибка", "Выберите хотя бы один контроль для удаления")
             return
         
         # Подтверждение удаления
