@@ -242,20 +242,73 @@ class ConcreteApp(tk.Tk):
         )
 
         self.construction_tree.bind("<Button-1>", self.toggle_checkbox)
+
+        ###### Метод для работы с чекбоксами ######
+    def toggle_all_checkboxes(self):
+        """Переключает состояние всех чекбоксов"""
+        current_state = self.construction_tree.heading("selected", "text")
+        new_state = "☐" if current_state == "☑" else "☑"
+    
+        # Обновляем заголовок
+        self.construction_tree.heading("selected", text=new_state)
+    
+        # Обновляем все чекбоксы
+        for item in self.construction_tree.get_children():
+            self.construction_tree.set(item, "selected", new_state)
         
-        # Добавляем колонку с чекбоксами
-        self.construction_tree.heading("selected", text="✓")
-        self.construction_tree.column("selected", width=30, anchor="center")
+            # Добавляем колонку с чекбоксами
+            self.construction_tree.heading("selected", text="☐", command=self.toggle_all_checkboxes)
+            self.construction_tree.column("selected", width=30, anchor="center")
+
+    def toggle_checkbox(self, event):
+        """Обработчик клика по чекбоксу"""
+        region = self.construction_tree.identify("region", event.x, event.y)
+        column = self.construction_tree.identify_column(event.x)
+    
+        if region == "heading" and column == "#1":
+            # Клик по заголовку колонки чекбоксов
+            self.toggle_all_checkboxes()
+            return
+        
+        if region == "cell" and column == "#1":
+            # Клик по чекбоксу в строке
+            item = self.construction_tree.identify_row(event.y)
+            current_value = self.construction_tree.set(item, "selected")
+            new_value = "☑" if current_value != "☑" else "☐"
+            self.construction_tree.set(item, "selected", new_value)
+        
+        # Обновляем состояние заголовка
+        self.update_header_checkbox_state()
+
+        #### Обновление сосотояния чекбокса ####
+    def update_header_checkbox_state(self):
+        """Обновляет состояние чекбокса в заголовке"""
+        all_items = self.construction_tree.get_children()
+        if not all_items:
+            return
+        
+        checked_count = sum(1 for item in all_items 
+                      if self.construction_tree.set(item, "selected") == "☑")
+    
+        if checked_count == 0:
+            new_header_state = "☐"
+        elif checked_count == len(all_items):
+            new_header_state = "☑"
+        else:
+            new_header_state = "☒"  # Промежуточное состояние
+    
+        self.construction_tree.heading("selected", text=new_header_state)
+        
 
         # Остальные колонки
         for text, col, width in columns:
             self.construction_tree.heading(col, text=text)
             self.construction_tree.column(col, width=width, anchor='center')
         
-        scrollbar = ttk.Scrollbar(construction_frame, orient="vertical", command=self.construction_tree.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.construction_tree.configure(yscrollcommand=scrollbar.set)
-        self.construction_tree.pack(fill=tk.BOTH, expand=True)
+            scrollbar = ttk.Scrollbar(construction_frame, orient="vertical", command=self.construction_tree.yview)
+            scrollbar.pack(side="right", fill="y")
+            self.construction_tree.configure(yscrollcommand=scrollbar.set)
+            self.construction_tree.pack(fill=tk.BOTH, expand=True)
 
     ################## Методы для работы с интерфейсом ##################
     def start_resize(self, event):
@@ -290,16 +343,7 @@ class ConcreteApp(tk.Tk):
     def stop_resize_object_panel(self, event):
         self.resizing_object_panel = False
 
-    def toggle_checkbox(self, event):
-        """Обработчик клика по чекбоксу"""
-        region = self.construction_tree.identify("region", event.x, event.y)
-        if region == "cell":
-            column = self.construction_tree.identify_column(event.x)
-            if column == "#1":  # Колонка с чекбоксами
-                item = self.construction_tree.identify_row(event.y)
-                current_value = self.construction_tree.set(item, "selected")
-                new_value = "☑" if current_value != "☑" else "☐"
-                self.construction_tree.set(item, "selected", new_value)
+    
 
     def get_selected_constructions(self):
         """Получаем список выбранных конструктивов"""
@@ -371,6 +415,7 @@ class ConcreteApp(tk.Tk):
         for row in cursor.fetchall():
             values = ["☐"] + [str(row[i]) if row[i] is not None else "" for i in range(1, len(row))]
             self.construction_tree.insert("", "end", values=values, iid=row[0])
+            self.update_header_checkbox_state()
         
     def apply_filters(self):
         filters = {}
@@ -384,6 +429,7 @@ class ConcreteApp(tk.Tk):
         for entry in self.filter_entries.values():
             entry.delete(0, tk.END)
         self.load_constructions()
+        self.update_header_checkbox_state()
     
     def refresh_data(self):
         self.load_organizations()
