@@ -275,53 +275,7 @@ class ConcreteApp(tk.Tk):
 
         # Привязка обработчика кликов
         self.construction_tree.bind("<Button-1>", self.toggle_checkbox)
-        # подсчет выделеных строк
-        self.status_var = tk.StringVar()
-        self.status_var.set("Готово")
-        status_bar = ttk.Label(self, textvariable=self.status_var, 
-                      style="Status.TLabel", relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
-        self.status_frame = ttk.Frame(self)
-        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
-
-        # Счетчик выделенных элементов
-        self.selected_count_var = tk.StringVar()
-        self.selected_count_var.set("Выделено: 0")
-        selected_label = ttk.Label(self.status_frame, textvariable=self.selected_count_var)
-        selected_label.pack(side=tk.LEFT)
-
-        # Общий счетчик элементов
-        self.total_count_var = tk.StringVar()
-        self.total_count_var.set("Всего: 0")
-        total_label = ttk.Label(self.status_frame, textvariable=self.total_count_var)
-        total_label.pack(side=tk.LEFT, padx=10)
-
-        # Статус выполнения операций
-        self.status_var = tk.StringVar()
-        self.status_var.set("Готово")
-        status_label = ttk.Label(self.status_frame, textvariable=self.status_var)
-        status_label.pack(side=tk.RIGHT)
-
-        # обновление счетчиков 
-    def update_counters(self):
-        """Обновляет счетчики выделенных и всех элементов"""
-        selected = len(self.construction_tree.selection())
-        total = len(self.construction_tree.get_children())
-        
-        self.selected_count_var.set(f"Выделено: {selected}")
-        self.total_count_var.set(f"Всего: {total}")
-        
-        # Изменяем цвет в зависимости от количества выделенных
-        if selected == 0:
-            color = "red"
-        elif selected == total:
-            color = "green"
-        else:
-            color = "blue"
-        
-        selected_label = self.status_frame.winfo_children()[0]
-        selected_label.config(foreground=color)
      
     ###### Метод для работы с чекбоксами ######
     def update_selection_status(self):
@@ -339,7 +293,7 @@ class ConcreteApp(tk.Tk):
         for item in self.construction_tree.get_children():
             self.construction_tree.set(item, "selected", new_state)
         
-        self.update_counters()  # Обновляем счетчики
+       
 
     def toggle_checkbox(self, event):
         region = self.construction_tree.identify("region", event.x, event.y)
@@ -355,7 +309,7 @@ class ConcreteApp(tk.Tk):
             new_value = "☑" if current_value != "☑" else "☐"
             self.construction_tree.set(item, "selected", new_value)
         
-        self.update_counters()  # Обновляем счетчики
+        
         self.update_header_checkbox_state()
 
     def select_all_constructions(self):
@@ -364,14 +318,14 @@ class ConcreteApp(tk.Tk):
         for item in items:
             self.construction_tree.set(item, "selected", "☑")
         self.construction_tree.heading("selected", text="☑")
-        self.update_counters()  # Обновляем счетчики
+       
 
     def deselect_all_constructions(self):
         self.construction_tree.selection_remove(self.construction_tree.selection())
         for item in self.construction_tree.get_children():
             self.construction_tree.set(item, "selected", "☐")
         self.construction_tree.heading("selected", text="☐")
-        self.update_counters()  # Обновляем счетчики
+       
 
     def update_header_checkbox_state(self):
         """Обновляет состояние заголовка"""
@@ -384,7 +338,7 @@ class ConcreteApp(tk.Tk):
             self.construction_tree.heading("selected", text="☑")
         else:
             self.construction_tree.heading("selected", text="☒") 
-            self.update_selection_status()  
+            
 
         
     
@@ -469,55 +423,6 @@ class ConcreteApp(tk.Tk):
             self.current_object_id = None
         self.update_buttons_state()
 
-    def load_constructions(self, filters=None):
-        if not self.current_object_id:
-            return
-        
-        self.construction_tree.delete(*self.construction_tree.get_children())
-
-        cursor = self.db.conn.cursor()
-        query = """
-            SELECT id, pour_date, element, concrete_class, frost_resistance, water_resistance,
-            supplier, concrete_passport, volume_concrete, cubes_count, cones_count,
-            slump, temperature, temp_measurements, executor, act_number, request_number
-            FROM constructions 
-            WHERE object_id = ?
-        """
-        params = [self.current_object_id]
-
-        if filters:
-            query += " AND " + " AND ".join([f"{key} LIKE ?" for key in filters.keys()])
-            params.extend([f"%{value}%" for value in filters.values()])
-
-        cursor.execute(query, params)
-    
-        for row in cursor.fetchall():
-            values = ["☐"] + [str(row[i]) if row[i] is not None else "" for i in range(1, len(row))]
-            self.construction_tree.insert("", "end", values=values, iid=row[0])
-            self.update_counters()  # Обновляем счетчики после загрузки
-        self.update_header_checkbox_state()
-        
-    def apply_filters(self):
-        filters = {}
-        for key, entry in self.filter_entries.items():
-            if entry.get():
-                filters[key] = entry.get()
-        
-        self.load_constructions(filters)
-    
-    def reset_filters(self):
-        for entry in self.filter_entries.values():
-            entry.delete(0, tk.END)
-        self.load_constructions()
-        self.update_header_checkbox_state()
-    
-    def refresh_data(self):
-        self.load_organizations()
-        if self.current_org_id:
-            self.load_objects()
-        if self.current_object_id:
-            self.load_constructions()
-        self.update_buttons_state()
 
     ################## Методы для работы с организациями ################
     def add_organization(self):
@@ -699,6 +604,55 @@ class ConcreteApp(tk.Tk):
         ttk.Button(dialog, text="Сохранить", command=save).grid(row=len(fields), columnspan=2, pady=10)
 
     ################## Методы для работы с контролем ################
+    def load_constructions(self, filters=None):
+        if not self.current_object_id:
+            return
+        
+        self.construction_tree.delete(*self.construction_tree.get_children())
+
+        cursor = self.db.conn.cursor()
+        query = """
+            SELECT id, pour_date, element, concrete_class, frost_resistance, water_resistance,
+            supplier, concrete_passport, volume_concrete, cubes_count, cones_count,
+            slump, temperature, temp_measurements, executor, act_number, request_number
+            FROM constructions 
+            WHERE object_id = ?
+        """
+        params = [self.current_object_id]
+
+        if filters:
+            query += " AND " + " AND ".join([f"{key} LIKE ?" for key in filters.keys()])
+            params.extend([f"%{value}%" for value in filters.values()])
+
+        cursor.execute(query, params)
+    
+        for row in cursor.fetchall():
+            values = ["☐"] + [str(row[i]) if row[i] is not None else "" for i in range(1, len(row))]
+            self.construction_tree.insert("", "end", values=values, iid=row[0])
+            self.update_header_checkbox_state()
+        
+    def apply_filters(self):
+        filters = {}
+        for key, entry in self.filter_entries.items():
+            if entry.get():
+                filters[key] = entry.get()
+        
+        self.load_constructions(filters)
+    
+    def reset_filters(self):
+        for entry in self.filter_entries.values():
+            entry.delete(0, tk.END)
+        self.load_constructions()
+        self.update_header_checkbox_state()
+    
+    def refresh_data(self):
+        self.load_organizations()
+        if self.current_org_id:
+            self.load_objects()
+        if self.current_object_id:
+            self.load_constructions()
+        self.update_buttons_state()
+
     def add_construction(self):
         if not self.current_object_id:
             messagebox.showwarning("Ошибка", "Сначала выберите объект")
