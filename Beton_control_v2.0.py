@@ -50,6 +50,12 @@ class ConcreteDatabase:
         cursor = self.conn.cursor()
         for script in scripts:
             cursor.execute(script)
+        # Миграция: добавляем колонку 'invoice' в constructions, если отсутствует
+        cursor.execute("PRAGMA table_info(constructions)")
+        columns_info = cursor.fetchall()
+        column_names = [col[1] for col in columns_info]
+        if 'invoice' not in column_names:
+            cursor.execute("ALTER TABLE constructions ADD COLUMN invoice TEXT")
         self.conn.commit()
 
 
@@ -200,7 +206,8 @@ class ConcreteApp(tk.Tk):
             ("Дата:", "pour_date"),
             ("Класс бетона:", "concrete_class"),
             ("Исполнитель:", "executor"),
-            ("Поставщик:", "supplier")
+            ("Поставщик:", "supplier"),
+            ("Счет:", "invoice")
         ]
         
         self.filter_entries = {}
@@ -219,20 +226,21 @@ class ConcreteApp(tk.Tk):
         columns = [
             ("Дата", "pour_date", 80),
             ("Конструктив", "element", 120),
-            ("Класс", "concrete_class", 70),
-            ("Мороз", "frost_resistance", 70),
-            ("Вода", "water_resistance", 70),
+            ("Класс", "concrete_class", 50),
+            ("Мороз.", "frost_resistance", 60),
+            ("Вода.", "water_resistance", 50),
             ("Поставщик", "supplier", 120),
             ("Паспорт", "concrete_passport", 120),
-            ("Объем", "volume_concrete", 60),
+            ("Объем", "volume_concrete", 50),
             ("Кубики", "cubes_count", 60),
             ("Конусы", "cones_count", 60),
             ("Осадка", "slump", 60),
-            ("Темп.", "temperature", 60),
+            ("Темп.", "temperature", 50),
             ("Замеры", "temp_measurements", 70),
             ("Исполнитель", "executor", 120),
             ("№ Акта", "act_number", 80),
-            ("№ Заявки", "request_number", 80)
+            ("№ Заявки", "request_number", 80),
+            ("Счет", "invoice", 90)
         ]
         
         # Создаем Treeview с колонкой для чекбоксов
@@ -263,7 +271,7 @@ class ConcreteApp(tk.Tk):
         # Горизонтальная полоса прокрутки для нижней панели
         scrollbar_x = ttk.Scrollbar(construction_frame, orient="horizontal", command=self.construction_tree.xview)
         self.construction_tree.configure(xscrollcommand=scrollbar_x.set)
-        scrollbar_x.pack(side="top", fill="x")
+        scrollbar_x.pack(side="bottom", fill="x")
         
 
         # Кнопки управления выделением
@@ -484,7 +492,7 @@ class ConcreteApp(tk.Tk):
         query = """
             SELECT id, pour_date, element, concrete_class, frost_resistance, water_resistance,
             supplier, concrete_passport, volume_concrete, cubes_count, cones_count,
-            slump, temperature, temp_measurements, executor, act_number, request_number
+            slump, temperature, temp_measurements, executor, act_number, request_number, invoice
             FROM constructions 
             WHERE object_id = ?
         """
@@ -732,21 +740,39 @@ class ConcreteApp(tk.Tk):
             ("Замеры темп.:", "temp_measurements"),
             ("Исполнитель:", "executor"),
             ("№ Акта:", "act_number"),
-            ("№ Заявки:", "request_number")
+            ("№ Заявки:", "request_number"),
+            ("Счет:", "invoice")
         ]
         
         entries = {}
+        supplier_values = self._get_distinct_suppliers()
+        class_values = ["B7.5", "B10", "B12.5", "B15", "B20", "B22.5", "B25", "B27.5", "B30", "B35", "B40"]
+        frost_values = ["F50", "F75", "F100", "F150", "F200", "F300", "F400", "F500"]
+        water_values = ["W2", "W4", "W6", "W8", "W10", "W12", "W14"]
+
         for i, (label, name) in enumerate(fields):
             ttk.Label(dialog, text=label).grid(row=i, column=0, padx=5, pady=2, sticky='e')
-            entry = ttk.Entry(dialog)
+            if name == 'supplier':
+                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly')
+            elif name == 'concrete_class':
+                entry = ttk.Combobox(dialog, values=class_values, state='readonly')
+            elif name == 'frost_resistance':
+                entry = ttk.Combobox(dialog, values=frost_values, state='readonly')
+            elif name == 'water_resistance':
+                entry = ttk.Combobox(dialog, values=water_values, state='readonly')
+            else:
+                entry = ttk.Entry(dialog)
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='w')
             entries[name] = entry
         
         # Установка значений по умолчанию
         entries['pour_date'].insert(0, datetime.now().strftime("%d-%m-%Y"))
-        entries['concrete_class'].insert(0, "B")
-        entries['frost_resistance'].insert(0, "F")
-        entries['water_resistance'].insert(0, "W")
+        if isinstance(entries['concrete_class'], ttk.Combobox) and entries['concrete_class']['values']:
+            entries['concrete_class'].current(0)
+        if isinstance(entries['frost_resistance'], ttk.Combobox) and entries['frost_resistance']['values']:
+            entries['frost_resistance'].current(0)
+        if isinstance(entries['water_resistance'], ttk.Combobox) and entries['water_resistance']['values']:
+            entries['water_resistance'].current(0)
         
         def save():
             try:
@@ -758,8 +784,8 @@ class ConcreteApp(tk.Tk):
                         object_id, pour_date, element, concrete_class, frost_resistance,
                         water_resistance, supplier, concrete_passport, volume_concrete, cubes_count,
                         cones_count, slump, temperature, temp_measurements,
-                        executor, act_number, request_number
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        executor, act_number, request_number, invoice
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         self.current_object_id,
                         entries['pour_date'].get(),
@@ -777,7 +803,8 @@ class ConcreteApp(tk.Tk):
                         int(entries['temp_measurements'].get() or 0),
                         entries['executor'].get(),
                         entries['act_number'].get(),
-                        entries['request_number'].get()
+                        entries['request_number'].get(),
+                        entries['invoice'].get()
                     )
                 )
                 self.db.conn.commit()
@@ -851,7 +878,7 @@ class ConcreteApp(tk.Tk):
         cursor.execute("""
             SELECT pour_date, element, concrete_class, frost_resistance, water_resistance,
                    supplier, concrete_passport, volume_concrete, cubes_count, cones_count,
-                   slump, temperature, temp_measurements, executor, act_number, request_number
+                   slump, temperature, temp_measurements, executor, act_number, request_number, invoice
             FROM constructions WHERE id=?
         """, (constr_id,))
         constr_data = cursor.fetchone()
@@ -877,14 +904,33 @@ class ConcreteApp(tk.Tk):
             ("Замеры темп.:", "temp_measurements", constr_data[12]),
             ("Исполнитель:", "executor", constr_data[13]),
             ("№ Акта:", "act_number", constr_data[14]),
-            ("№ Заявки:", "request_number", constr_data[15])
+            ("№ Заявки:", "request_number", constr_data[15]),
+            ("Счет:", "invoice", constr_data[16])
         ]
         
         entries = {}
+        supplier_values = self._get_distinct_suppliers()
+        class_values = ["B7.5", "B10", "B12.5", "B15", "B20", "B22.5", "B25", "B27.5", "B30", "B35", "B40"]
+        frost_values = ["F50", "F75", "F100", "F150", "F200", "F300", "F400", "F500"]
+        water_values = ["W2", "W4", "W6", "W8", "W10", "W12", "W14"]
+
         for i, (label, name, value) in enumerate(fields):
             ttk.Label(dialog, text=label).grid(row=i, column=0, padx=5, pady=2, sticky='e')
-            entry = ttk.Entry(dialog)
-            entry.insert(0, str(value) if value is not None else "")
+            if name == 'supplier':
+                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly')
+                if value: entry.set(str(value))
+            elif name == 'concrete_class':
+                entry = ttk.Combobox(dialog, values=class_values, state='readonly')
+                if value: entry.set(str(value))
+            elif name == 'frost_resistance':
+                entry = ttk.Combobox(dialog, values=frost_values, state='readonly')
+                if value: entry.set(str(value))
+            elif name == 'water_resistance':
+                entry = ttk.Combobox(dialog, values=water_values, state='readonly')
+                if value: entry.set(str(value))
+            else:
+                entry = ttk.Entry(dialog)
+                entry.insert(0, str(value) if value is not None else "")
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='w')
             entries[name] = entry
         
@@ -896,7 +942,7 @@ class ConcreteApp(tk.Tk):
                         water_resistance=?, supplier=?, concrete_passport=?,
                         volume_concrete=?, cubes_count=?, cones_count=?,
                         slump=?, temperature=?, temp_measurements=?,
-                        executor=?, act_number=?, request_number=?
+                        executor=?, act_number=?, request_number=?, invoice=?
                     WHERE id=?
                 """, (
                     entries['pour_date'].get(),
@@ -915,6 +961,7 @@ class ConcreteApp(tk.Tk):
                     entries['executor'].get(),
                     entries['act_number'].get(),
                     entries['request_number'].get(),
+                    entries['invoice'].get(),
                     constr_id
                 ))
                 self.db.conn.commit()
@@ -958,7 +1005,7 @@ class ConcreteApp(tk.Tk):
             cursor.execute("""
                 SELECT 
                     c.pour_date, c.element, c.concrete_class, c.frost_resistance, c.water_resistance,  
-                    c.supplier, c.concrete_passport, c.volume_concrete, c.cubes_count, c.act_number, c.request_number,
+                    c.supplier, c.concrete_passport, c.volume_concrete, c.cubes_count, c.act_number, c.request_number, c.invoice,
                     o.name as object_name, o.address,
                     org.name as org_name, org.contact, org.phone
                 FROM constructions c
@@ -1001,7 +1048,8 @@ class ConcreteApp(tk.Tk):
                     'volume': construction_data.get('volume_concrete', '') or '',
                     
                     'act': construction_data.get('act_number', '') or '',
-                    'request': construction_data.get('request_number', '') or '' 
+                    'request': construction_data.get('request_number', '') or '',
+                    'invoice': construction_data.get('invoice', '') or '' 
                 },
                 'organization': {
                     'name': construction_data.get('org_name', '') or '',
@@ -1062,7 +1110,7 @@ class ConcreteApp(tk.Tk):
                 "Дата (ДД-ММ-ГГГГ)", "Конструктив", "Класс бетона", "Морозостойкость", 
                 "Водопроницаемость", "Поставщик", "Паспорт", "Объем бетона",
                 "Кубики", "Конусы", "Осадка", "Температура", "Замеры темп.",
-                "Исполнитель", "№ Акта", "№ Заявки"
+                "Исполнитель", "№ Акта", "№ Заявки", "Счет"
             ])
             filename = "template_constr.xlsx"
         else:
@@ -1165,7 +1213,8 @@ class ConcreteApp(tk.Tk):
                 'temp_measurements': row[headers.index('Замеры темп.')] if 'Замеры темп.' in headers else 0,
                 'executor': row[headers.index('Исполнитель')] if 'Исполнитель' in headers else None,
                 'act_number': row[headers.index('№ Акта')] if '№ Акта' in headers else None,
-                'request_number': row[headers.index('№ Заявки')] if '№ Заявки' in headers else None
+                'request_number': row[headers.index('№ Заявки')] if '№ Заявки' in headers else None,
+                'invoice': row[headers.index('Счет')] if 'Счет' in headers else None
             }
 
             self.db.conn.execute("""
@@ -1173,8 +1222,8 @@ class ConcreteApp(tk.Tk):
                     object_id, pour_date, element, concrete_class, frost_resistance,
                     water_resistance, supplier, concrete_passport, volume_concrete, cubes_count,
                     cones_count, slump, temperature, temp_measurements,
-                    executor, act_number, request_number
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    executor, act_number, request_number, invoice
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, tuple(data.values()))
 
             imported_count += 1
@@ -1209,7 +1258,7 @@ class ConcreteApp(tk.Tk):
             cursor.execute("""
                 SELECT pour_date, element, concrete_class, frost_resistance, water_resistance,
                     supplier, concrete_passport, volume_concrete, cubes_count, cones_count,
-                    slump, temperature, temp_measurements, executor, act_number, request_number
+                    slump, temperature, temp_measurements, executor, act_number, request_number, invoice
                 FROM constructions 
                 WHERE object_id = ?
                 ORDER BY pour_date
@@ -1247,7 +1296,7 @@ class ConcreteApp(tk.Tk):
                 "Дата", "Конструктив", "Класс бетона", "Морозостойкость", "Водопроницаемость",
                 "Поставщик", "Паспорт", "Объем бетона", "Кубики", "Конусы",
                 "Осадка", "Температура", "Замеры темп.", "Исполнитель", 
-                "№ Акта", "№ Заявки"
+                "№ Акта", "№ Заявки", "Счет"
             ]
             ws.append(headers)
     
@@ -1292,6 +1341,18 @@ class ConcreteApp(tk.Tk):
             messagebox.showerror("Ошибка", f"Произошла ошибка при экспорте:\n{str(e)}")
 
     ################## Вспомогательные методы ###########################
+    def _get_distinct_suppliers(self):
+        """Возвращает список уникальных поставщиков из БД для выпадающего списка."""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT supplier FROM constructions "
+                "WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier"
+            )
+            return [row[0] for row in cursor.fetchall()]
+        except Exception:
+            return []
+
     def update_buttons_state(self):
         """Обновляет состояние кнопок в зависимости от выбора"""
         states = {
