@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
+from ttkbootstrap import Style
+from ttkbootstrap.widgets import DateEntry
 import sqlite3
 from datetime import datetime
 import os
@@ -78,6 +80,8 @@ class ConcreteApp(tk.Tk):
 
         self.title("Учет бетонных работ (prototipe by Kliapich v2.0)")
         self.geometry("1500x600")
+        # Стиль ttkbootstrap: тема по умолчанию
+        self.style = Style(theme="flatly")
         # Инициализация базы данных
         self.db = ConcreteDatabase()
         self.current_org_id = None
@@ -159,8 +163,11 @@ class ConcreteApp(tk.Tk):
         
     
         #################### Кнопки управления ##########################
-        btn_frame = ttk.LabelFrame(self.left_panel, text="Действия", padding=5)
-        btn_frame.pack(fill=tk.X, pady=5)
+        # Компактный стиль для кнопок действий
+        self.style.configure("Slim.TButton", padding=(6, 2))
+
+        btn_frame = ttk.LabelFrame(self.left_panel, text="Действия", padding=3)
+        btn_frame.pack(fill=tk.X, pady=2)
 
         # кнопки
         buttons = [
@@ -182,10 +189,11 @@ class ConcreteApp(tk.Tk):
         ]
 
         for text, cmd in buttons:
-            btn = ttk.Button(btn_frame, text=text, command=cmd)
-            btn.pack(fill=tk.X, pady=2)
+            btn = ttk.Button(btn_frame, text=text, command=cmd, style="Slim.TButton")
+            btn.pack(fill=tk.X, pady=1)
             self.buttons_dict[text] = btn
-    
+
+        
         #################### Таблица организаций #########################
         org_frame = ttk.LabelFrame(self.left_panel, text="Организации", padding=5)
         org_frame.pack(fill=tk.BOTH, expand=True)
@@ -195,6 +203,15 @@ class ConcreteApp(tk.Tk):
         self.org_tree.column("name", width=self.left_panel_width-30)
         self.org_tree.pack(fill=tk.BOTH, expand=True)
         self.org_tree.bind("<<TreeviewSelect>>", self.on_org_select)
+        
+        # Выбор темы оформления (перемещено под панель Организации)
+        theme_frame = ttk.LabelFrame(self.left_panel, text="Тема", padding=5)
+        theme_frame.pack(fill=tk.X, pady=5)
+        theme_values = self.style.theme_names()
+        self.theme_combo = ttk.Combobox(theme_frame, values=theme_values, state='readonly', width=8)
+        self.theme_combo.set(self.style.theme.name)
+        self.theme_combo.pack(side=tk.LEFT, padx=(0,5))
+        ttk.Button(theme_frame, text="Применить", command=self.apply_selected_theme).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Фрейм фильтров
         filter_frame = ttk.Frame(construction_frame)
@@ -719,7 +736,7 @@ class ConcreteApp(tk.Tk):
             
         dialog = tk.Toplevel(self)
         dialog.title("Добавить контроль")
-        dialog.geometry("280x440")
+        dialog.geometry("280x620")
         dialog.grab_set()
 
         saved_successfully = False
@@ -752,21 +769,26 @@ class ConcreteApp(tk.Tk):
 
         for i, (label, name) in enumerate(fields):
             ttk.Label(dialog, text=label).grid(row=i, column=0, padx=5, pady=2, sticky='e')
-            if name == 'supplier':
-                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly')
+            if name == 'pour_date':
+                entry = DateEntry(dialog, firstweekday=0, bootstyle="secondary", dateformat="%d-%m-%Y", width=15)
+            elif name == 'supplier':
+                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly', width=16)
             elif name == 'concrete_class':
-                entry = ttk.Combobox(dialog, values=class_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=class_values, state='readonly', width=16)
             elif name == 'frost_resistance':
-                entry = ttk.Combobox(dialog, values=frost_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=frost_values, state='readonly', width=16)
             elif name == 'water_resistance':
-                entry = ttk.Combobox(dialog, values=water_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=water_values, state='readonly', width=16)
             else:
-                entry = ttk.Entry(dialog)
+                entry = ttk.Entry(dialog, width=18)
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='w')
             entries[name] = entry
         
         # Установка значений по умолчанию
-        entries['pour_date'].insert(0, datetime.now().strftime("%d-%m-%Y"))
+        if isinstance(entries['pour_date'], DateEntry):
+            entries['pour_date'].set_date(datetime.now())
+        else:
+            entries['pour_date'].insert(0, datetime.now().strftime("%d-%m-%Y"))
         if isinstance(entries['concrete_class'], ttk.Combobox) and entries['concrete_class']['values']:
             entries['concrete_class'].current(0)
         if isinstance(entries['frost_resistance'], ttk.Combobox) and entries['frost_resistance']['values']:
@@ -788,7 +810,7 @@ class ConcreteApp(tk.Tk):
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         self.current_object_id,
-                        entries['pour_date'].get(),
+                        entries['pour_date'].entry.get() if isinstance(entries['pour_date'], DateEntry) else entries['pour_date'].get(),
                         entries['element'].get(),
                         entries['concrete_class'].get(),
                         entries['frost_resistance'].get(),
@@ -885,7 +907,7 @@ class ConcreteApp(tk.Tk):
         
         dialog = tk.Toplevel(self)
         dialog.title("Редактировать контроль")
-        dialog.geometry("280x440")
+        dialog.geometry("280x620")
         dialog.grab_set()
         
         fields = [
@@ -916,20 +938,32 @@ class ConcreteApp(tk.Tk):
 
         for i, (label, name, value) in enumerate(fields):
             ttk.Label(dialog, text=label).grid(row=i, column=0, padx=5, pady=2, sticky='e')
-            if name == 'supplier':
-                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly')
+            if name == 'pour_date':
+                entry = DateEntry(dialog, firstweekday=0, bootstyle="secondary", dateformat="%d-%m-%Y", width=15)
+                if value:
+                    try:
+                        entry.set_date(datetime.strptime(str(value), "%d-%m-%Y"))
+                    except Exception:
+                        try:
+                            # Попытка установить напрямую строкой, если формат отличается
+                            entry.entry.delete(0, tk.END)
+                            entry.entry.insert(0, str(value))
+                        except Exception:
+                            pass
+            elif name == 'supplier':
+                entry = ttk.Combobox(dialog, values=supplier_values, state='readonly', width=16)
                 if value: entry.set(str(value))
             elif name == 'concrete_class':
-                entry = ttk.Combobox(dialog, values=class_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=class_values, state='readonly', width=16)
                 if value: entry.set(str(value))
             elif name == 'frost_resistance':
-                entry = ttk.Combobox(dialog, values=frost_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=frost_values, state='readonly', width=16)
                 if value: entry.set(str(value))
             elif name == 'water_resistance':
-                entry = ttk.Combobox(dialog, values=water_values, state='readonly')
+                entry = ttk.Combobox(dialog, values=water_values, state='readonly', width=16)
                 if value: entry.set(str(value))
             else:
-                entry = ttk.Entry(dialog)
+                entry = ttk.Entry(dialog, width=18)
                 entry.insert(0, str(value) if value is not None else "")
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='w')
             entries[name] = entry
@@ -945,7 +979,7 @@ class ConcreteApp(tk.Tk):
                         executor=?, act_number=?, request_number=?, invoice=?
                     WHERE id=?
                 """, (
-                    entries['pour_date'].get(),
+                    entries['pour_date'].entry.get() if isinstance(entries['pour_date'], DateEntry) else entries['pour_date'].get(),
                     entries['element'].get(),
                     entries['concrete_class'].get(),
                     entries['frost_resistance'].get(),
@@ -1341,6 +1375,18 @@ class ConcreteApp(tk.Tk):
             messagebox.showerror("Ошибка", f"Произошла ошибка при экспорте:\n{str(e)}")
 
     ################## Вспомогательные методы ###########################
+    def apply_selected_theme(self):
+        """Применяет выбранную тему ttkbootstrap."""
+        try:
+            selected = getattr(self, 'theme_combo', None)
+            if selected is None:
+                return
+            theme_name = selected.get()
+            if theme_name:
+                self.style.theme_use(theme_name)
+        except Exception as e:
+            messagebox.showerror("Ошибка темы", str(e))
+
     def _get_distinct_suppliers(self):
         """Возвращает список уникальных поставщиков из БД для выпадающего списка."""
         try:
