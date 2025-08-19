@@ -255,10 +255,15 @@ class ConcreteApp(tk.Tk):
             self.construction_tree.column(col, width=width, anchor='center')
             
         # Полосы прокрутки
-        scrollbar = ttk.Scrollbar(construction_frame, orient="vertical", command=self.construction_tree.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.construction_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar_y = ttk.Scrollbar(construction_frame, orient="vertical", command=self.construction_tree.yview)
+        scrollbar_y.pack(side="right", fill="y")
+        self.construction_tree.configure(yscrollcommand=scrollbar_y.set)
         self.construction_tree.pack(fill=tk.BOTH, expand=True)
+
+        # Горизонтальная полоса прокрутки для нижней панели
+        scrollbar_x = ttk.Scrollbar(construction_frame, orient="horizontal", command=self.construction_tree.xview)
+        self.construction_tree.configure(xscrollcommand=scrollbar_x.set)
+        scrollbar_x.pack(side="top", fill="x")
         
 
         # Кнопки управления выделением
@@ -942,7 +947,9 @@ class ConcreteApp(tk.Tk):
             self.generate_document(constr_id, "act_template.docx", "Акт")
 
     def generate_document(self, constr_id, template_name, doc_type):
+        """Генерация документа (акта или заявки) на основе шаблона"""
         try:
+            # Проверка существования шаблона
             if not os.path.exists(template_name):
                 messagebox.showerror("Ошибка", f"Шаблон {template_name} не найден")
                 return
@@ -968,13 +975,14 @@ class ConcreteApp(tk.Tk):
             
             construction_data = dict(zip(columns, row))
 
-            try:
-                pour_date = datetime.strptime(construction_data['pour_date'], "%d-%m-%Y")
-                file_date = pour_date.strftime("%d-%m-%Y")
-                doc_date = pour_date.strftime("%d.%m.%Y")
-            except ValueError:
-                file_date = "без_даты"
-                doc_date = construction_data['pour_date']
+            # Обработка даты
+            #try:
+            #     pour_date = datetime.strptime(construction_data['pour_date'], "%d-%m-%Y")
+            #   formatted_date = pour_date.strftime("%d.%m.%Y")
+            #    file_date = pour_date.strftime(formatted_date)
+            #except ValueError:
+            #    file_date = "pour_date"
+                
                 
                 ################ Индексы для замены слов ####################
             context = {
@@ -1002,21 +1010,27 @@ class ConcreteApp(tk.Tk):
                 }
             }
             
+                # Формирование имени файла
             object_name = construction_data.get('object_name', 'объект').replace(' ', '_')
-            safe_filename = (
-                f"{doc_type}_"
-                f"{object_name[:30]}_"
-                f"{file_date}.docx"
-            )
-
+            element_name = construction_data.get('element', 'конструктив').replace(' ', '_')
+            pour_date = construction_data.get('pour_date', 'дата заливки').replace(' ', '_')
+            
+            # Удаляем запрещенные символы в имени файла
+            safe_object = "".join(c for c in object_name if c.isalnum() or c in (' ', '_')).strip()
+            safe_element = "".join(c for c in element_name if c.isalnum() or c in (' ', '_')).strip()
+            
+            filename = f"{safe_object}_{safe_element}_{pour_date}_{doc_type}.docx"
+            
+            # Диалог сохранения файла с предложенным именем
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".docx",
                 filetypes=[("Документ Word", "*.docx")],
-                initialfile=safe_filename,
+                initialfile=filename,  # Предлагаем сформированное имя
                 title=f"Сохранить {doc_type.lower()}"
             )
         
             if filepath:
+                # Заполнение и сохранение шаблона
                 doc = DocxTemplate(template_name)
                 doc.render(context)
                 doc.save(filepath)
