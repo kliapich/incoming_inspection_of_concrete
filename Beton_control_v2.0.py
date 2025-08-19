@@ -257,7 +257,7 @@ class ConcreteApp(tk.Tk):
             ("Исполнитель", "executor", 120),
             ("№ Акта", "act_number", 80),
             ("№ Заявки", "request_number", 80),
-            ("Счет", "invoice", 90)
+            ("Счет", "invoice", 50)
         ]
         
         # Создаем Treeview с колонкой для чекбоксов
@@ -302,6 +302,12 @@ class ConcreteApp(tk.Tk):
         deselect_all_btn = ttk.Button(btn_frame, text="Снять выделение", 
                                     command=self.deselect_all_constructions)
         deselect_all_btn.pack(side=tk.LEFT, padx=5)
+
+        # Добавление значения в столбец "Счет" для выбранных записей
+        self.invoice_value_var = tk.StringVar()
+        self.invoice_entry = ttk.Entry(btn_frame, textvariable=self.invoice_value_var, width=18)
+        self.invoice_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Добавить в счет", command=self.add_selected_to_invoice).pack(side=tk.LEFT, padx=5)
 
         # Привязка обработчика кликов
         self.construction_tree.bind("<Button-1>", self.toggle_checkbox)
@@ -415,6 +421,36 @@ class ConcreteApp(tk.Tk):
         else:
             self.construction_tree.heading("selected", text="☒") 
             self.update_selection_status()  
+
+    def add_selected_to_invoice(self):
+        """Проставляет указанное значение в поле 'invoice' для выбранных записей."""
+        value = self.invoice_value_var.get().strip()
+        if not value:
+            messagebox.showwarning("Внимание", "Введите значение счета")
+            return
+        items = self.get_selected_constructions()
+        if not items:
+            messagebox.showwarning("Внимание", "Выберите хотя бы одну запись")
+            return
+        try:
+            cursor = self.db.conn.cursor()
+            placeholders = ','.join(['?'] * len(items))
+            params = [value] + list(items)
+            cursor.execute(f"UPDATE constructions SET invoice = ? WHERE id IN ({placeholders})", params)
+            self.db.conn.commit()
+            # Обновляем значения в таблице
+            for iid in items:
+                if self.construction_tree.exists(iid):
+                    self.construction_tree.set(iid, 'invoice', value)
+            messagebox.showinfo("Готово", f"Обновлено записей: {cursor.rowcount}")
+            # Очистка поля и фокус обратно на ввод
+            self.invoice_value_var.set("")
+            try:
+                self.invoice_entry.focus_set()
+            except Exception:
+                pass
+        except sqlite3.Error as e:
+            messagebox.showerror("Ошибка", f"Не удалось обновить счет: {str(e)}")
 
         
     
