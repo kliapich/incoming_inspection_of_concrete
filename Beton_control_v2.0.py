@@ -17,6 +17,7 @@ import asyncio
 import os
 import re
 from typing import Optional, List
+import tempfile
 import sqlite3
 from datetime import datetime
 import os
@@ -87,7 +88,7 @@ class TelegramBotService:
 
     # Conversation states
     (ACTION, ORG, OBJ, CLASS, FROST, WATER, ELEMENT, SUPPLIER, PASSPORT,
-     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE) = range(19)
+     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE, SEND_ACT) = range(20)
 
     def __init__(self, token: str, db_path: str = 'concrete.db'):
         self.token = token
@@ -571,6 +572,7 @@ class TelegramBotService:
                     )
                 )
                 db_conn.commit()
+                new_id = cur.lastrowid
             except Exception as e:
                 msg = f"Ошибка сохранения: {str(e)}"
                 if edit_message and update.callback_query:
@@ -579,12 +581,105 @@ class TelegramBotService:
                     await update.effective_message.reply_text(msg)
                 return ConversationHandler.END
 
-            final_msg = "Молодец что не был ленивой жопой и заполнил базу данных"
+            # Предложить сразу прислать документы
+            context.user_data['new_construction_id'] = new_id
+            keyboard = [
+                [InlineKeyboardButton("Прислать акт", callback_data="SEND:ACT"), InlineKeyboardButton("Прислать заявку", callback_data="SEND:REQ")],
+                [InlineKeyboardButton("Прислать оба", callback_data="SEND:BOTH")],
+                [InlineKeyboardButton("Нет, спасибо", callback_data="SEND:NONE")]
+            ]
+            text = "Молодец что не был ленивой жопой и заполнил базу данных. Что прислать?"
             if edit_message and update.callback_query:
-                await update.callback_query.edit_message_text(final_msg)
+                await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             else:
-                await update.effective_message.reply_text(final_msg)
-            context.user_data.clear()
+                await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            return self.SEND_ACT
+        async def send_act_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            choice = query.data.split(":", 1)[1]
+            if choice == 'NONE':
+                await query.edit_message_text("Ок, ничего не отправляю")
+                context.user_data.clear()
+                return ConversationHandler.END
+
+            constr_id = context.user_data.get('new_construction_id')
+            if not constr_id:
+                await query.edit_message_text("Не найден идентификатор записи")
+                context.user_data.clear()
+                return ConversationHandler.END
+
+            # Сгенерировать документ(ы) во временный файл и отправить
+            try:
+                cur = db_conn.cursor()
+                cur.execute("""
+                    SELECT 
+                        c.pour_date, c.element, c.concrete_class, c.frost_resistance, c.water_resistance,  
+                        c.supplier, c.concrete_passport, c.volume_concrete, c.cubes_count, c.act_number, c.request_number,
+                        o.name as object_name, o.address,
+                        org.name as org_name, org.contact, org.phone
+                    FROM constructions c
+                    JOIN objects o ON c.object_id = o.id
+                    JOIN organizations org ON o.org_id = org.id
+                    WHERE c.id = ?
+                """, (constr_id,))
+                columns = [col[0] for col in cur.description]
+                row = cur.fetchone()
+                if not row:
+                    await query.edit_message_text("Запись не найдена для документов")
+                    context.user_data.clear()
+                    return ConversationHandler.END
+                construction_data = dict(zip(columns, row))
+
+                async def render_and_send(template_file: str, doc_type: str, filename: str):
+                    context_tpl = {
+                        'doc_type': doc_type,
+                        'current_date': datetime.now().strftime("%d.%m.%Y"),
+                        'construction': {
+                            'object': construction_data.get('object_name', '') or '',
+                            'address': construction_data.get('address', '') or '',
+                            'date': construction_data.get('pour_date', '') or '',
+                            'element': construction_data.get('element', '') or '',  
+                            'concrete': construction_data.get('concrete_class', '') or '',
+                            'frost': construction_data.get('frost_resistance', '') or '',
+                            'water': construction_data.get('water_resistance', '') or '',
+                            'supplier': construction_data.get('supplier', '') or '',
+                            'passport': construction_data.get('concrete_passport', '') or '',
+                            'volume': construction_data.get('volume_concrete', '') or '',
+                            'act': construction_data.get('act_number', '') or '',
+                            'request': construction_data.get('request_number', '') or '' 
+                        },
+                        'organization': {
+                            'name': construction_data.get('org_name', '') or '',
+                            'contact': construction_data.get('contact', '') or '',
+                            'phone': construction_data.get('phone', '') or ''
+                        }
+                    }
+                    if not os.path.exists(template_file):
+                        await query.message.reply_text(f"Шаблон не найден: {template_file}")
+                        return False
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        out_path = os.path.join(tmpdir, filename)
+                        doc = DocxTemplate(template_file)
+                        doc.render(context_tpl)
+                        doc.save(out_path)
+                        with open(out_path, 'rb') as f:
+                            await query.message.reply_document(document=f, filename=filename)
+                    return True
+
+                sent_any = False
+                if choice in ('ACT', 'BOTH'):
+                    ok = await render_and_send('act_template.docx', 'Акт', 'act.docx')
+                    sent_any = sent_any or ok
+                if choice in ('REQ', 'BOTH'):
+                    ok = await render_and_send('request_template.docx', 'Заявка', 'request.docx')
+                    sent_any = sent_any or ok
+
+                await query.edit_message_text("Готово" if sent_any else "Не удалось отправить документы")
+            except Exception as e:
+                await query.edit_message_text(f"Ошибка при формировании акта: {str(e)}")
+            finally:
+                context.user_data.clear()
             return ConversationHandler.END
 
         async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,6 +713,7 @@ class TelegramBotService:
                     CallbackQueryHandler(skip_selected, pattern=r"^SKIP:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, date_input)
                 ],
+                self.SEND_ACT: [CallbackQueryHandler(send_act_choice, pattern=r"^SEND_ACT:")],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
             allow_reentry=True,
