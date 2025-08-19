@@ -2,6 +2,21 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 from ttkbootstrap import Style
 from ttkbootstrap.widgets import DateEntry
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
+)
+import threading
+import asyncio
+import os
+import re
+from typing import Optional, List
 import sqlite3
 from datetime import datetime
 import os
@@ -59,6 +74,429 @@ class ConcreteDatabase:
         if 'invoice' not in column_names:
             cursor.execute("ALTER TABLE constructions ADD COLUMN invoice TEXT")
         self.conn.commit()
+
+
+# =================== Telegram Bot Service ===================
+TELEGRAM_BOT_TOKEN = os.getenv(
+    'TELEGRAM_BOT_TOKEN',
+    '7619596833:AAEtEBVEcQeyevk61-kZdXvpZp1skfdzomA'
+)
+
+class TelegramBotService:
+    """Background Telegram bot that guides user to add a new construction record."""
+
+    # Conversation states
+    (ACTION, ORG, OBJ, CLASS, FROST, WATER, ELEMENT, SUPPLIER, PASSPORT,
+     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, DATE) = range(18)
+
+    def __init__(self, token: str, db_path: str = 'concrete.db'):
+        self.token = token
+        self.db_path = db_path
+        self.thread: Optional[threading.Thread] = None
+
+    def is_running(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def start(self) -> None:
+        if self.is_running():
+            return
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        print("[TG] Building application...")
+        application = ApplicationBuilder().token(self.token).build()
+
+        # Local DB connection for this thread
+        try:
+            db_conn = sqlite3.connect(self.db_path)
+        except Exception as e:
+            print(f"[TG] DB connect error: {e}")
+            return
+
+        def fetchall(query: str, params: tuple = ()):
+            cur = db_conn.cursor()
+            cur.execute(query, params)
+            return cur.fetchall()
+
+        def fetch_distinct(column: str) -> List[str]:
+            rows = fetchall(
+                f"SELECT DISTINCT {column} FROM constructions WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"
+            )
+            return [r[0] for r in rows]
+
+        async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            keyboard = [[InlineKeyboardButton("Хочу добавить контроль", callback_data="ACTION:ADD")]]
+            await update.effective_message.reply_text(
+                "Че надо?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.ACTION
+
+        async def action_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            if query.data == "ACTION:ADD":
+                # Ask for organization
+                orgs = fetchall("SELECT id, name FROM organizations ORDER BY name")
+                if not orgs:
+                    await query.edit_message_text("Нет организаций в базе.")
+                    return ConversationHandler.END
+                keyboard = []
+                row = []
+                for oid, name in orgs:
+                    row.append(InlineKeyboardButton(name, callback_data=f"ORG:{oid}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                await query.edit_message_text(
+                    "Какая организация?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return self.ORG
+            return ConversationHandler.END
+
+        async def org_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            m = re.match(r"ORG:(\d+)", query.data)
+            if not m:
+                await query.edit_message_text("Неверный выбор организации")
+                return ConversationHandler.END
+            org_id = int(m.group(1))
+            context.user_data['org_id'] = org_id
+
+            objs = fetchall("SELECT id, name FROM objects WHERE org_id=? ORDER BY name", (org_id,))
+            if not objs:
+                await query.edit_message_text("У организации нет объектов.")
+                return ConversationHandler.END
+            keyboard = []
+            row = []
+            for oid, name in objs:
+                row.append(InlineKeyboardButton(name, callback_data=f"OBJ:{oid}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await query.edit_message_text(
+                "Какой объект?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.OBJ
+
+        async def obj_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            m = re.match(r"OBJ:(\d+)", query.data)
+            if not m:
+                await query.edit_message_text("Неверный выбор объекта")
+                return ConversationHandler.END
+            object_id = int(m.group(1))
+            context.user_data['object_id'] = object_id
+
+            classes = fetch_distinct('concrete_class')
+            if not classes:
+                classes = ["B15", "B20", "B25", "B30"]
+            keyboard = []
+            row = []
+            for val in classes:
+                row.append(InlineKeyboardButton(val, callback_data=f"CLASS:{val}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await query.edit_message_text(
+                "Класс бетона?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.CLASS
+
+        async def class_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            context.user_data['concrete_class'] = query.data.split(":", 1)[1]
+
+            frosts = fetch_distinct('frost_resistance')
+            if not frosts:
+                frosts = ["F100", "F150", "F200"]
+            keyboard = []
+            row = []
+            for val in frosts:
+                row.append(InlineKeyboardButton(val, callback_data=f"FROST:{val}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await query.edit_message_text(
+                "Морозостойкость?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.FROST
+
+        async def frost_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            context.user_data['frost_resistance'] = query.data.split(":", 1)[1]
+
+            waters = fetch_distinct('water_resistance')
+            if not waters:
+                waters = ["W4", "W6", "W8", "W10"]
+            keyboard = []
+            row = []
+            for val in waters:
+                row.append(InlineKeyboardButton(val, callback_data=f"WATER:{val}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await query.edit_message_text(
+                "Водопроницаемость?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.WATER
+
+        async def water_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            context.user_data['water_resistance'] = query.data.split(":", 1)[1]
+            await query.edit_message_text("Конструктив? (введите текст)")
+            return self.ELEMENT
+
+        async def element_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['element'] = update.message.text.strip()
+            suppliers = fetch_distinct('supplier')
+            if not suppliers:
+                suppliers = ["Неизвестно"]
+            keyboard = []
+            row = []
+            for val in suppliers:
+                row.append(InlineKeyboardButton(val, callback_data=f"SUPPLIER:{val}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await update.message.reply_text(
+                "Поставщик?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.SUPPLIER
+
+        async def supplier_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            context.user_data['supplier'] = query.data.split(":", 1)[1]
+            await query.edit_message_text("Паспорт? (введите текст)")
+            return self.PASSPORT
+
+        async def passport_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['concrete_passport'] = update.message.text.strip()
+            await update.message.reply_text("Количество кубиков? (число)")
+            return self.CUBES
+
+        async def cubes_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                context.user_data['cubes_count'] = int(update.message.text.strip())
+            except Exception:
+                await update.message.reply_text("Введите целое число для кубиков")
+                return self.CUBES
+            await update.message.reply_text("Количество конусов? (число)")
+            return self.CONES
+
+        async def cones_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                context.user_data['cones_count'] = int(update.message.text.strip())
+            except Exception:
+                await update.message.reply_text("Введите целое число для конусов")
+                return self.CONES
+            await update.message.reply_text("Просадка? (введите текст, например 10)")
+            return self.SLUMP
+
+        async def slump_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['slump'] = update.message.text.strip()
+            await update.message.reply_text("Объем бетонной смеси? (число, можно с точкой)")
+            return self.VOLUME
+
+        async def volume_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                context.user_data['volume_concrete'] = float(update.message.text.strip())
+            except Exception:
+                await update.message.reply_text("Введите число для объема")
+                return self.VOLUME
+            await update.message.reply_text("Температура? (введите текст, например 12)")
+            return self.TEMP
+
+        async def temp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['temperature'] = update.message.text.strip()
+            await update.message.reply_text("Сколько замеров темп.? (целое число)")
+            return self.TEMP_MEAS
+
+        async def temp_meas_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                context.user_data['temp_measurements'] = int(update.message.text.strip())
+            except Exception:
+                await update.message.reply_text("Введите целое число для замеров")
+                return self.TEMP_MEAS
+
+            executors = fetch_distinct('executor')
+            if not executors:
+                executors = ["Исполнитель"]
+            keyboard = []
+            row = []
+            for val in executors:
+                row.append(InlineKeyboardButton(val, callback_data=f"EXECUTOR:{val}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await update.message.reply_text(
+                "Исполнитель?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.EXECUTOR
+
+        async def executor_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            context.user_data['executor'] = query.data.split(":", 1)[1]
+            await query.edit_message_text("Как назвать Акт? (введите текст)")
+            return self.ACT
+
+        async def act_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['act_number'] = update.message.text.strip()
+            keyboard = [[
+                InlineKeyboardButton("Сегодня", callback_data="DATE:TODAY")
+            ]]
+            await update.message.reply_text(
+                "Какая дата? (введите ДД-ММ-ГГГГ или нажмите 'Сегодня')",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.DATE
+
+        async def date_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            from datetime import datetime as dt
+            context.user_data['pour_date'] = dt.now().strftime("%d-%m-%Y")
+            return await finalize_and_save(update, context, edit_message=True)
+
+        async def date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            text = update.message.text.strip()
+            if not re.match(r"^\d{2}-\d{2}-\d{4}$", text):
+                await update.message.reply_text("Формат даты: ДД-ММ-ГГГГ")
+                return self.DATE
+            context.user_data['pour_date'] = text
+            return await finalize_and_save(update, context, edit_message=False)
+
+        async def finalize_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE, edit_message: bool):
+            data = context.user_data
+            # Required fields defaulting
+            fields = {
+                'object_id': int(data.get('object_id')),
+                'pour_date': data.get('pour_date') or '',
+                'element': data.get('element') or '',
+                'concrete_class': data.get('concrete_class') or '',
+                'frost_resistance': data.get('frost_resistance') or '',
+                'water_resistance': data.get('water_resistance') or '',
+                'supplier': data.get('supplier') or '',
+                'concrete_passport': data.get('concrete_passport') or '',
+                'volume_concrete': float(data.get('volume_concrete') or 0),
+                'cubes_count': int(data.get('cubes_count') or 0),
+                'cones_count': int(data.get('cones_count') or 0),
+                'slump': data.get('slump') or '',
+                'temperature': data.get('temperature') or '',
+                'temp_measurements': int(data.get('temp_measurements') or 0),
+                'executor': data.get('executor') or '',
+                'act_number': data.get('act_number') or '',
+                'request_number': '',
+                'invoice': ''
+            }
+            try:
+                cur = db_conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO constructions (
+                        object_id, pour_date, element, concrete_class, frost_resistance,
+                        water_resistance, supplier, concrete_passport, volume_concrete, cubes_count,
+                        cones_count, slump, temperature, temp_measurements,
+                        executor, act_number, request_number, invoice
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fields['object_id'], fields['pour_date'], fields['element'], fields['concrete_class'],
+                        fields['frost_resistance'], fields['water_resistance'], fields['supplier'], fields['concrete_passport'],
+                        fields['volume_concrete'], fields['cubes_count'], fields['cones_count'], fields['slump'],
+                        fields['temperature'], fields['temp_measurements'], fields['executor'], fields['act_number'],
+                        fields['request_number'], fields['invoice']
+                    )
+                )
+                db_conn.commit()
+            except Exception as e:
+                msg = f"Ошибка сохранения: {str(e)}"
+                if edit_message and update.callback_query:
+                    await update.callback_query.edit_message_text(msg)
+                else:
+                    await update.effective_message.reply_text(msg)
+                return ConversationHandler.END
+
+            final_msg = "Молодец что не был ленивой жопой и заполнил базу данных"
+            if edit_message and update.callback_query:
+                await update.callback_query.edit_message_text(final_msg)
+            else:
+                await update.effective_message.reply_text(final_msg)
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data.clear()
+            await update.effective_message.reply_text("Отменено")
+            return ConversationHandler.END
+
+        conv = ConversationHandler(
+            entry_points=[CommandHandler("start", start_cmd)],
+            states={
+                self.ACTION: [CallbackQueryHandler(action_selected, pattern=r"^ACTION:")],
+                self.ORG: [CallbackQueryHandler(org_selected, pattern=r"^ORG:")],
+                self.OBJ: [CallbackQueryHandler(obj_selected, pattern=r"^OBJ:")],
+                self.CLASS: [CallbackQueryHandler(class_selected, pattern=r"^CLASS:")],
+                self.FROST: [CallbackQueryHandler(frost_selected, pattern=r"^FROST:")],
+                self.WATER: [CallbackQueryHandler(water_selected, pattern=r"^WATER:")],
+                self.ELEMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, element_input)],
+                self.SUPPLIER: [CallbackQueryHandler(supplier_selected, pattern=r"^SUPPLIER:")],
+                self.PASSPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, passport_input)],
+                self.CUBES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cubes_input)],
+                self.CONES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cones_input)],
+                self.SLUMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, slump_input)],
+                self.VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, volume_input)],
+                self.TEMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_input)],
+                self.TEMP_MEAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_meas_input)],
+                self.EXECUTOR: [CallbackQueryHandler(executor_selected, pattern=r"^EXECUTOR:")],
+                self.ACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, act_input)],
+                self.DATE: [
+                    CallbackQueryHandler(date_today, pattern=r"^DATE:TODAY$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, date_input)
+                ],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+            allow_reentry=True,
+        )
+
+        application.add_handler(conv)
+        try:
+            print("[TG] Preparing event loop...")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            print("[TG] Starting polling...")
+            application.run_polling()
+        except Exception as e:
+            print(f"[TG] run_polling error: {e}")
 
 
 class ConcreteApp(tk.Tk):
@@ -185,7 +623,8 @@ class ConcreteApp(tk.Tk):
             ("Создать акт", self.create_act),
             ("Шаблон для импорта", self.generate_import_template),
             ("Импорт из Excel", self.import_from_excel),
-            ("Экспорт в Excel", self.export_to_excel)
+            ("Экспорт в Excel", self.export_to_excel),
+            ("Запустить бота", self.start_telegram_bot)
         ]
 
         for text, cmd in buttons:
@@ -1415,6 +1854,19 @@ class ConcreteApp(tk.Tk):
             messagebox.showerror("Ошибка", f"Произошла ошибка при экспорте:\n{str(e)}")
 
     ################## Вспомогательные методы ###########################
+    def start_telegram_bot(self):
+        """Запускает Telegram-бота в фоновом потоке (один раз)."""
+        try:
+            if not hasattr(self, '_tg_service'):
+                self._tg_service = TelegramBotService(TELEGRAM_BOT_TOKEN)
+            if self._tg_service.is_running():
+                messagebox.showinfo("Бот", "Бот уже запущен")
+                return
+            self._tg_service.start()
+            messagebox.showinfo("Бот", "Бот запущен. В Telegram отправьте /start")
+        except Exception as e:
+            messagebox.showerror("Ошибка бота", str(e))
+
     def apply_selected_theme(self):
         """Применяет выбранную тему ttkbootstrap."""
         try:
