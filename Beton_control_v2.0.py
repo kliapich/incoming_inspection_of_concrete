@@ -88,7 +88,8 @@ class TelegramBotService:
 
     # Conversation states
     (ACTION, ORG, OBJ, CLASS, FROST, WATER, ELEMENT, SUPPLIER, PASSPORT,
-     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE, SEND_ACT, SEND_REQ) = range(21)
+     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE,
+     SEND_ACT, DOC_PICK, ORG_DOCS, OBJ_DOCS) = range(23)
 
     def __init__(self, token: str, db_path: str = 'concrete.db'):
         self.token = token
@@ -127,7 +128,10 @@ class TelegramBotService:
             return [r[0] for r in rows]
 
         async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            keyboard = [[InlineKeyboardButton("Хочу добавить контроль", callback_data="ACTION:ADD")]]
+            keyboard = [
+                [InlineKeyboardButton("Хочу добавить контроль", callback_data="ACTION:ADD")],
+                [InlineKeyboardButton("Сформировать документ по записи", callback_data="ACTION:DOCS")]
+            ]
             await update.effective_message.reply_text(
                 "Че надо?",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -157,6 +161,170 @@ class TelegramBotService:
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return self.ORG
+            if query.data == "ACTION:DOCS":
+                # Сначала спросим организацию
+                orgs = fetchall("SELECT id, name FROM organizations ORDER BY name")
+                if not orgs:
+                    await query.edit_message_text("Нет организаций в базе.")
+                    return ConversationHandler.END
+                keyboard = []
+                row = []
+                for oid, name in orgs:
+                    row.append(InlineKeyboardButton(name, callback_data=f"ORG_DOCS:{oid}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                await query.edit_message_text("Выберите организацию:", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.ORG_DOCS
+            return ConversationHandler.END
+        async def pick_construction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            m = re.match(r"PICK:(\d+)", query.data)
+            if not m:
+                await query.edit_message_text("Неверный выбор")
+                return ConversationHandler.END
+            constr_id = int(m.group(1))
+            # Предложить что сформировать
+            keyboard = [
+                [InlineKeyboardButton("Акт", callback_data=f"MAKE:ACT:{constr_id}"), InlineKeyboardButton("Заявку", callback_data=f"MAKE:REQ:{constr_id}")],
+                [InlineKeyboardButton("Оба", callback_data=f"MAKE:BOTH:{constr_id}")]
+            ]
+            await query.edit_message_text("Что сформировать?", reply_markup=InlineKeyboardMarkup(keyboard))
+            return self.DOC_PICK
+
+        async def org_docs_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            m = re.match(r"ORG_DOCS:(\d+)", query.data)
+            if not m:
+                await query.edit_message_text("Неверный выбор организации")
+                return ConversationHandler.END
+            org_id = int(m.group(1))
+            context.user_data['org_docs_id'] = org_id
+            objs = fetchall("SELECT id, name FROM objects WHERE org_id=? ORDER BY name", (org_id,))
+            if not objs:
+                await query.edit_message_text("У организации нет объектов.")
+                return ConversationHandler.END
+            keyboard = []
+            row = []
+            for oid, name in objs:
+                row.append(InlineKeyboardButton(name, callback_data=f"OBJ_DOCS:{oid}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
+            await query.edit_message_text("Выберите объект:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return self.OBJ_DOCS
+
+        async def obj_docs_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            m = re.match(r"OBJ_DOCS:(\d+)", query.data)
+            if not m:
+                await query.edit_message_text("Неверный выбор объекта")
+                return ConversationHandler.END
+            object_id = int(m.group(1))
+            # Показываем последние 50 записей по объекту
+            rows = fetchall(
+                """
+                SELECT id, pour_date, element, concrete_class
+                FROM constructions
+                WHERE object_id = ?
+                ORDER BY id DESC LIMIT 50
+                """,
+                (object_id,)
+            )
+            if not rows:
+                await query.edit_message_text("Нет контролей по этому объекту")
+                return ConversationHandler.END
+            keyboard = []
+            for cid, date, elem, cls in rows:
+                text = f"#{cid} | {date or ''} | {elem or ''} | {cls or ''}"
+                keyboard.append([InlineKeyboardButton(text[:60], callback_data=f"PICK:{cid}")])
+            await query.edit_message_text("Выбери запись:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return self.DOC_PICK
+
+        async def make_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            parts = query.data.split(":")
+            if len(parts) != 3:
+                await query.edit_message_text("Ошибка параметров")
+                return ConversationHandler.END
+            _, kind, id_str = parts
+            constr_id = int(id_str)
+            try:
+                cur = db_conn.cursor()
+                cur.execute("""
+                    SELECT 
+                        c.pour_date, c.element, c.concrete_class, c.frost_resistance, c.water_resistance,  
+                        c.supplier, c.concrete_passport, c.volume_concrete, c.cubes_count, c.act_number, c.request_number,
+                        o.name as object_name, o.address,
+                        org.name as org_name, org.contact, org.phone
+                    FROM constructions c
+                    JOIN objects o ON c.object_id = o.id
+                    JOIN organizations org ON o.org_id = org.id
+                    WHERE c.id = ?
+                """, (constr_id,))
+                columns = [col[0] for col in cur.description]
+                row = cur.fetchone()
+                if not row:
+                    await query.edit_message_text("Запись не найдена")
+                    return ConversationHandler.END
+                construction_data = dict(zip(columns, row))
+
+                async def render_and_send(template_file: str, doc_type: str, filename: str):
+                    context_tpl = {
+                        'doc_type': doc_type,
+                        'current_date': datetime.now().strftime("%d.%m.%Y"),
+                        'construction': {
+                            'object': construction_data.get('object_name', '') or '',
+                            'address': construction_data.get('address', '') or '',
+                            'date': construction_data.get('pour_date', '') or '',
+                            'element': construction_data.get('element', '') or '',  
+                            'concrete': construction_data.get('concrete_class', '') or '',
+                            'frost': construction_data.get('frost_resistance', '') or '',
+                            'water': construction_data.get('water_resistance', '') or '',
+                            'supplier': construction_data.get('supplier', '') or '',
+                            'passport': construction_data.get('concrete_passport', '') or '',
+                            'volume': construction_data.get('volume_concrete', '') or '',
+                            'act': construction_data.get('act_number', '') or '',
+                            'request': construction_data.get('request_number', '') or '' 
+                        },
+                        'organization': {
+                            'name': construction_data.get('org_name', '') or '',
+                            'contact': construction_data.get('contact', '') or '',
+                            'phone': construction_data.get('phone', '') or ''
+                        }
+                    }
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    template_path = os.path.join(base_dir, template_file)
+                    if not os.path.exists(template_path):
+                        await query.message.reply_text(f"Шаблон не найден: {template_path}")
+                        return False
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        out_path = os.path.join(tmpdir, filename)
+                        doc = DocxTemplate(template_path)
+                        doc.render(context_tpl)
+                        doc.save(out_path)
+                        with open(out_path, 'rb') as f:
+                            await query.message.reply_document(document=f, filename=filename)
+                    return True
+
+                sent_any = False
+                if kind in ('ACT', 'BOTH'):
+                    ok = await render_and_send('act_template.docx', 'Акт', 'act.docx')
+                    sent_any = sent_any or ok
+                if kind in ('REQ', 'BOTH'):
+                    ok = await render_and_send('request_template.docx', 'Заявка', 'request.docx')
+                    sent_any = sent_any or ok
+                await query.edit_message_text("Готово" if sent_any else "Не удалось отправить документы")
+            except Exception as e:
+                await query.edit_message_text(f"Ошибка: {str(e)}")
             return ConversationHandler.END
 
         async def org_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -693,6 +861,9 @@ class TelegramBotService:
             entry_points=[CommandHandler("start", start_cmd)],
             states={
                 self.ACTION: [CallbackQueryHandler(action_selected, pattern=r"^ACTION:")],
+                self.DOC_PICK: [CallbackQueryHandler(pick_construction, pattern=r"^PICK:"), CallbackQueryHandler(make_docs, pattern=r"^MAKE:")],
+                self.ORG_DOCS: [CallbackQueryHandler(org_docs_selected, pattern=r"^ORG_DOCS:")],
+                self.OBJ_DOCS: [CallbackQueryHandler(obj_docs_selected, pattern=r"^OBJ_DOCS:")],
                 self.ORG: [CallbackQueryHandler(org_selected, pattern=r"^ORG:")],
                 self.OBJ: [CallbackQueryHandler(obj_selected, pattern=r"^OBJ:")],
                 self.CLASS: [CallbackQueryHandler(class_selected, pattern=r"^CLASS:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:concrete_class$")],
