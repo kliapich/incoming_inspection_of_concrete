@@ -1007,6 +1007,11 @@ class ConcreteApp(tk.Tk):
         #################### Кнопки управления ##########################
         # Компактный стиль для кнопок действий
         self.style.configure("Slim.TButton", padding=(6, 2))
+        # Зафиксируем визуал сразу на старте
+        try:
+            self.configure_custom_styles()
+        except Exception:
+            pass
 
         btn_frame = ttk.LabelFrame(self.left_panel, text="Действия", padding=3)
         btn_frame.pack(fill=tk.X, pady=2)
@@ -2280,6 +2285,8 @@ class ConcreteApp(tk.Tk):
             theme_name = selected.get()
             if theme_name:
                 self.style.theme_use(theme_name)
+                # Стабилизируем размеры кнопок для разных тем
+                self.configure_custom_styles()
         except Exception as e:
             messagebox.showerror("Ошибка темы", str(e))
 
@@ -2294,6 +2301,14 @@ class ConcreteApp(tk.Tk):
             return [row[0] for row in cursor.fetchall()]
         except Exception:
             return []
+
+    def configure_custom_styles(self):
+        """Фиксирует параметры пользовательских стилей независимо от текущей темы."""
+        fixed_button_font = ("Segoe UI", 9)
+        try:
+            self.style.configure("Slim.TButton", padding=(6, 2), font=fixed_button_font)
+        except Exception:
+            self.style.configure("Slim.TButton", padding=(6, 2))
 
     def update_buttons_state(self):
         """Обновляет состояние кнопок в зависимости от выбора"""
