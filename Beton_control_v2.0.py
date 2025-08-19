@@ -921,7 +921,9 @@ class ConcreteApp(tk.Tk):
       
 
         self.title("Учет заливок бетона (prototipe by Kliapich v2.0)")
-        self.geometry("1500x600")
+        self.geometry("1500x700")
+        # Фиксируем размер окна и отключаем системный ресайз
+        self.resizable(False, False)
         # Стиль ttkbootstrap: тема по умолчанию
         self.style = Style(theme="flatly")
         # Отключаем sizegrip из темы (маленький квадрат/ручка внизу)
