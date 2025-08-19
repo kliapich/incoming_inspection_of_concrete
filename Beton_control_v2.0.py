@@ -1057,14 +1057,7 @@ class ConcreteApp(tk.Tk):
         self.org_tree.pack(fill=tk.BOTH, expand=True)
         self.org_tree.bind("<<TreeviewSelect>>", self.on_org_select)
         
-        # Выбор темы оформления (перемещено под панель Организации)
-        theme_frame = ttk.LabelFrame(self.left_panel, text="Тема", padding=5)
-        theme_frame.pack(fill=tk.X, pady=5)
-        theme_values = self.style.theme_names()
-        self.theme_combo = ttk.Combobox(theme_frame, values=theme_values, state='readonly', width=8)
-        self.theme_combo.set(self.style.theme.name)
-        self.theme_combo.pack(side=tk.LEFT, padx=(0,5))
-        ttk.Button(theme_frame, text="Применить", command=self.apply_selected_theme).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Панель выбора темы удалена по запросу пользователя
         
         # Фрейм фильтров
         filter_frame = ttk.Frame(construction_frame)
@@ -2281,24 +2274,9 @@ class ConcreteApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Ошибка бота", str(e))
 
+    # Панель тем удалена; оставляем хук на случай возвращения
     def apply_selected_theme(self):
-        """Применяет выбранную тему ttkbootstrap."""
-        try:
-            selected = getattr(self, 'theme_combo', None)
-            if selected is None:
-                return
-            theme_name = selected.get()
-            if theme_name:
-                self.style.theme_use(theme_name)
-                # Стабилизируем размеры кнопок для разных тем
-                self.configure_custom_styles()
-                # Убираем sizegrip и на новой теме
-                try:
-                    self.style.layout('TSizegrip', [])
-                except Exception:
-                    pass
-        except Exception as e:
-            messagebox.showerror("Ошибка темы", str(e))
+        pass
 
     def _get_distinct_suppliers(self):
         """Возвращает список уникальных поставщиков из БД для выпадающего списка."""
