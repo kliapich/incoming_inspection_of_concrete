@@ -87,7 +87,7 @@ class TelegramBotService:
 
     # Conversation states
     (ACTION, ORG, OBJ, CLASS, FROST, WATER, ELEMENT, SUPPLIER, PASSPORT,
-     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, DATE) = range(18)
+     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE) = range(19)
 
     def __init__(self, token: str, db_path: str = 'concrete.db'):
         self.token = token
@@ -197,9 +197,13 @@ class TelegramBotService:
             object_id = int(m.group(1))
             context.user_data['object_id'] = object_id
 
-            classes = fetch_distinct('concrete_class')
-            if not classes:
-                classes = ["B15", "B20", "B25", "B30"]
+            # Объединяем значения из БД и расширенный справочник
+            classes_db = fetch_distinct('concrete_class')
+            classes_fallback = ["B7,5", "B10", "B12,5", "B15", "B20", "B22,5", "B25", "B27,5", "B30", "B35", "B40", "B45", "B50"]
+            classes = []
+            for v in classes_db + classes_fallback:
+                if v not in classes:
+                    classes.append(v)
             keyboard = []
             row = []
             for val in classes:
@@ -209,10 +213,8 @@ class TelegramBotService:
                     row = []
             if row:
                 keyboard.append(row)
-            await query.edit_message_text(
-                "Класс бетона?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:concrete_class")])
+            await query.edit_message_text("Класс бетона?", reply_markup=InlineKeyboardMarkup(keyboard))
             return self.CLASS
 
         async def class_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220,9 +222,12 @@ class TelegramBotService:
             await query.answer()
             context.user_data['concrete_class'] = query.data.split(":", 1)[1]
 
-            frosts = fetch_distinct('frost_resistance')
-            if not frosts:
-                frosts = ["F100", "F150", "F200"]
+            frosts_db = fetch_distinct('frost_resistance')
+            frosts_fallback = ["F50", "F75", "F100", "F150", "F200", "F300", "F400", "F500"]
+            frosts = []
+            for v in frosts_db + frosts_fallback:
+                if v not in frosts:
+                    frosts.append(v)
             keyboard = []
             row = []
             for val in frosts:
@@ -232,10 +237,8 @@ class TelegramBotService:
                     row = []
             if row:
                 keyboard.append(row)
-            await query.edit_message_text(
-                "Морозостойкость?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:frost_resistance")])
+            await query.edit_message_text("Морозостойкость?", reply_markup=InlineKeyboardMarkup(keyboard))
             return self.FROST
 
         async def frost_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -243,9 +246,12 @@ class TelegramBotService:
             await query.answer()
             context.user_data['frost_resistance'] = query.data.split(":", 1)[1]
 
-            waters = fetch_distinct('water_resistance')
-            if not waters:
-                waters = ["W4", "W6", "W8", "W10"]
+            waters_db = fetch_distinct('water_resistance')
+            waters_fallback = ["W2", "W4", "W6", "W8", "W10", "W12", "W14"]
+            waters = []
+            for v in waters_db + waters_fallback:
+                if v not in waters:
+                    waters.append(v)
             keyboard = []
             row = []
             for val in waters:
@@ -255,17 +261,15 @@ class TelegramBotService:
                     row = []
             if row:
                 keyboard.append(row)
-            await query.edit_message_text(
-                "Водопроницаемость?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:water_resistance")])
+            await query.edit_message_text("Водопроницаемость?", reply_markup=InlineKeyboardMarkup(keyboard))
             return self.WATER
 
         async def water_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query = update.callback_query
             await query.answer()
             context.user_data['water_resistance'] = query.data.split(":", 1)[1]
-            await query.edit_message_text("Конструктив? (введите текст)")
+            await query.edit_message_text("Конструктив? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:element")]]))
             return self.ELEMENT
 
         async def element_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -282,22 +286,20 @@ class TelegramBotService:
                     row = []
             if row:
                 keyboard.append(row)
-            await update.message.reply_text(
-                "Поставщик?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:supplier")])
+            await update.message.reply_text("Поставщик?", reply_markup=InlineKeyboardMarkup(keyboard))
             return self.SUPPLIER
 
         async def supplier_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query = update.callback_query
             await query.answer()
             context.user_data['supplier'] = query.data.split(":", 1)[1]
-            await query.edit_message_text("Паспорт? (введите текст)")
+            await query.edit_message_text("Паспорт? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:concrete_passport")]]))
             return self.PASSPORT
 
         async def passport_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['concrete_passport'] = update.message.text.strip()
-            await update.message.reply_text("Количество кубиков? (число)")
+            await update.message.reply_text("Количество кубиков? (число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:cubes_count")]]))
             return self.CUBES
 
         async def cubes_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,7 +308,7 @@ class TelegramBotService:
             except Exception:
                 await update.message.reply_text("Введите целое число для кубиков")
                 return self.CUBES
-            await update.message.reply_text("Количество конусов? (число)")
+            await update.message.reply_text("Количество конусов? (число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:cones_count")]]))
             return self.CONES
 
         async def cones_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -315,12 +317,12 @@ class TelegramBotService:
             except Exception:
                 await update.message.reply_text("Введите целое число для конусов")
                 return self.CONES
-            await update.message.reply_text("Просадка? (введите текст, например 10)")
+            await update.message.reply_text("Просадка? (введите текст, например 10)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:slump")]]))
             return self.SLUMP
 
         async def slump_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['slump'] = update.message.text.strip()
-            await update.message.reply_text("Объем бетонной смеси? (число, можно с точкой)")
+            await update.message.reply_text("Объем бетонной смеси? (число, можно с точкой)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:volume_concrete")]]))
             return self.VOLUME
 
         async def volume_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,12 +331,12 @@ class TelegramBotService:
             except Exception:
                 await update.message.reply_text("Введите число для объема")
                 return self.VOLUME
-            await update.message.reply_text("Температура? (введите текст, например 12)")
+            await update.message.reply_text("Температура? (введите текст, например 12)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:temperature")]]))
             return self.TEMP
 
         async def temp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['temperature'] = update.message.text.strip()
-            await update.message.reply_text("Сколько замеров темп.? (целое число)")
+            await update.message.reply_text("Сколько замеров темп.? (целое число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:temp_measurements")]]))
             return self.TEMP_MEAS
 
         async def temp_meas_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,24 +358,25 @@ class TelegramBotService:
                     row = []
             if row:
                 keyboard.append(row)
-            await update.message.reply_text(
-                "Исполнитель?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:executor")])
+            await update.message.reply_text("Исполнитель?", reply_markup=InlineKeyboardMarkup(keyboard))
             return self.EXECUTOR
 
         async def executor_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query = update.callback_query
             await query.answer()
             context.user_data['executor'] = query.data.split(":", 1)[1]
-            await query.edit_message_text("Как назвать Акт? (введите текст)")
+            await query.edit_message_text("Как назвать Акт? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:act_number")]]))
             return self.ACT
 
         async def act_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['act_number'] = update.message.text.strip()
-            keyboard = [[
-                InlineKeyboardButton("Сегодня", callback_data="DATE:TODAY")
-            ]]
+            await update.message.reply_text("№ Заявки? (введите текст)")
+            return self.REQUEST
+
+        async def request_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            context.user_data['request_number'] = update.message.text.strip()
+            keyboard = [[InlineKeyboardButton("Сегодня", callback_data="DATE:TODAY")], [InlineKeyboardButton("Пропустить", callback_data="SKIP:pour_date")]]
             await update.message.reply_text(
                 "Какая дата? (введите ДД-ММ-ГГГГ или нажмите 'Сегодня')",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -395,6 +398,136 @@ class TelegramBotService:
             context.user_data['pour_date'] = text
             return await finalize_and_save(update, context, edit_message=False)
 
+        async def skip_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            field = query.data.split(":", 1)[1]
+            defaults = {
+                'concrete_class': '',
+                'frost_resistance': '',
+                'water_resistance': '',
+                'element': '',
+                'supplier': '',
+                'concrete_passport': '',
+                'cubes_count': 0,
+                'cones_count': 0,
+                'slump': '',
+                'volume_concrete': 0.0,
+                'temperature': '',
+                'temp_measurements': 0,
+                'executor': '',
+                'act_number': '',
+                'request_number': '',
+                'pour_date': None,
+            }
+            context.user_data[field] = defaults.get(field)
+
+            # route to next step
+            if field == 'concrete_class':
+                frosts = fetch_distinct('frost_resistance')
+                if not frosts:
+                    frosts = ["F50", "F100", "F150", "F200", "F300", "F400"]
+                keyboard = []
+                row = []
+                for val in frosts:
+                    row.append(InlineKeyboardButton(val, callback_data=f"FROST:{val}"))
+                    if len(row) == 3:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:frost_resistance")])
+                await query.edit_message_text("Морозостойкость?", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.FROST
+            if field == 'frost_resistance':
+                waters = fetch_distinct('water_resistance')
+                if not waters:
+                    waters = ["W2", "W4", "W6", "W8", "W10"]
+                keyboard = []
+                row = []
+                for val in waters:
+                    row.append(InlineKeyboardButton(val, callback_data=f"WATER:{val}"))
+                    if len(row) == 3:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:water_resistance")])
+                await query.edit_message_text("Водопроницаемость?", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.WATER
+            if field == 'water_resistance':
+                await query.edit_message_text("Конструктив? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:element")]]))
+                return self.ELEMENT
+            if field == 'element':
+                suppliers = fetch_distinct('supplier')
+                if not suppliers:
+                    suppliers = ["Неизвестно"]
+                keyboard = []
+                row = []
+                for val in suppliers:
+                    row.append(InlineKeyboardButton(val, callback_data=f"SUPPLIER:{val}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:supplier")])
+                await query.edit_message_text("Поставщик?", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.SUPPLIER
+            if field == 'supplier':
+                await query.edit_message_text("Паспорт? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:concrete_passport")]]))
+                return self.PASSPORT
+            if field == 'concrete_passport':
+                await query.edit_message_text("Количество кубиков? (число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:cubes_count")]]))
+                return self.CUBES
+            if field == 'cubes_count':
+                await query.edit_message_text("Количество конусов? (число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:cones_count")]]))
+                return self.CONES
+            if field == 'cones_count':
+                await query.edit_message_text("Просадка? (введите текст, например 10)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:slump")]]))
+                return self.SLUMP
+            if field == 'slump':
+                await query.edit_message_text("Объем бетонной смеси? (число, можно с точкой)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:volume_concrete")]]))
+                return self.VOLUME
+            if field == 'volume_concrete':
+                await query.edit_message_text("Температура? (введите текст, например 12)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:temperature")]]))
+                return self.TEMP
+            if field == 'temperature':
+                await query.edit_message_text("Сколько замеров темп.? (целое число)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:temp_measurements")]]))
+                return self.TEMP_MEAS
+            if field == 'temp_measurements':
+                executors = fetch_distinct('executor')
+                if not executors:
+                    executors = ["Исполнитель"]
+                keyboard = []
+                row = []
+                for val in executors:
+                    row.append(InlineKeyboardButton(val, callback_data=f"EXECUTOR:{val}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+                if row:
+                    keyboard.append(row)
+                keyboard.append([InlineKeyboardButton("Пропустить", callback_data="SKIP:executor")])
+                await query.edit_message_text("Исполнитель?", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.EXECUTOR
+            if field == 'executor':
+                await query.edit_message_text("Как назвать Акт? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:act_number")]]))
+                return self.ACT
+            if field == 'act_number':
+                await query.edit_message_text("№ Заявки? (введите текст)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="SKIP:request_number")]]))
+                return self.REQUEST
+            if field == 'request_number':
+                keyboard = [[InlineKeyboardButton("Сегодня", callback_data="DATE:TODAY")], [InlineKeyboardButton("Пропустить", callback_data="SKIP:pour_date")]]
+                await query.edit_message_text("Какая дата? (введите ДД-ММ-ГГГГ или нажмите 'Сегодня')", reply_markup=InlineKeyboardMarkup(keyboard))
+                return self.DATE
+            if field == 'pour_date':
+                from datetime import datetime as dt
+                context.user_data['pour_date'] = dt.now().strftime("%d-%m-%Y")
+                return await finalize_and_save(update, context, edit_message=True)
+            await query.edit_message_text("Отменено")
+            return ConversationHandler.END
+
         async def finalize_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE, edit_message: bool):
             data = context.user_data
             # Required fields defaulting
@@ -415,7 +548,7 @@ class TelegramBotService:
                 'temp_measurements': int(data.get('temp_measurements') or 0),
                 'executor': data.get('executor') or '',
                 'act_number': data.get('act_number') or '',
-                'request_number': '',
+                'request_number': data.get('request_number') or '',
                 'invoice': ''
             }
             try:
@@ -465,22 +598,24 @@ class TelegramBotService:
                 self.ACTION: [CallbackQueryHandler(action_selected, pattern=r"^ACTION:")],
                 self.ORG: [CallbackQueryHandler(org_selected, pattern=r"^ORG:")],
                 self.OBJ: [CallbackQueryHandler(obj_selected, pattern=r"^OBJ:")],
-                self.CLASS: [CallbackQueryHandler(class_selected, pattern=r"^CLASS:")],
-                self.FROST: [CallbackQueryHandler(frost_selected, pattern=r"^FROST:")],
-                self.WATER: [CallbackQueryHandler(water_selected, pattern=r"^WATER:")],
+                self.CLASS: [CallbackQueryHandler(class_selected, pattern=r"^CLASS:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:concrete_class$")],
+                self.FROST: [CallbackQueryHandler(frost_selected, pattern=r"^FROST:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:frost_resistance$")],
+                self.WATER: [CallbackQueryHandler(water_selected, pattern=r"^WATER:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:water_resistance$")],
                 self.ELEMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, element_input)],
-                self.SUPPLIER: [CallbackQueryHandler(supplier_selected, pattern=r"^SUPPLIER:")],
-                self.PASSPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, passport_input)],
-                self.CUBES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cubes_input)],
-                self.CONES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cones_input)],
-                self.SLUMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, slump_input)],
-                self.VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, volume_input)],
-                self.TEMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_input)],
-                self.TEMP_MEAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_meas_input)],
-                self.EXECUTOR: [CallbackQueryHandler(executor_selected, pattern=r"^EXECUTOR:")],
-                self.ACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, act_input)],
+                self.SUPPLIER: [CallbackQueryHandler(supplier_selected, pattern=r"^SUPPLIER:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:supplier$")],
+                self.PASSPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, passport_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:concrete_passport$")],
+                self.CUBES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cubes_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:cubes_count$")],
+                self.CONES: [MessageHandler(filters.TEXT & ~filters.COMMAND, cones_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:cones_count$")],
+                self.SLUMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, slump_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:slump$")],
+                self.VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, volume_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:volume_concrete$")],
+                self.TEMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:temperature$")],
+                self.TEMP_MEAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, temp_meas_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:temp_measurements$")],
+                self.EXECUTOR: [CallbackQueryHandler(executor_selected, pattern=r"^EXECUTOR:"), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:executor$")],
+                self.ACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, act_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:act_number$")],
+                self.REQUEST: [MessageHandler(filters.TEXT & ~filters.COMMAND, request_input), CallbackQueryHandler(skip_selected, pattern=r"^SKIP:request_number$")],
                 self.DATE: [
                     CallbackQueryHandler(date_today, pattern=r"^DATE:TODAY$"),
+                    CallbackQueryHandler(skip_selected, pattern=r"^SKIP:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, date_input)
                 ],
             },
