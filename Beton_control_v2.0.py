@@ -920,10 +920,15 @@ class ConcreteApp(tk.Tk):
               
       
 
-        self.title("Учет бетонных работ (prototipe by Kliapich v2.0)")
+        self.title("Учет заливок бетона (prototipe by Kliapich v2.0)")
         self.geometry("1500x600")
         # Стиль ttkbootstrap: тема по умолчанию
         self.style = Style(theme="flatly")
+        # Отключаем sizegrip из темы (маленький квадрат/ручка внизу)
+        try:
+            self.style.layout('TSizegrip', [])
+        except Exception:
+            pass
         # Инициализация базы данных
         self.db = ConcreteDatabase()
         self.current_org_id = None
@@ -1095,8 +1100,8 @@ class ConcreteApp(tk.Tk):
             ("Мороз.", "frost_resistance", 60),
             ("Вода.", "water_resistance", 50),
             ("Поставщик", "supplier", 120),
-            ("Паспорт", "concrete_passport", 120),
-            ("Объем", "volume_concrete", 50),
+            ("Паспорт", "concrete_passport", 80),
+            ("Объем", "volume_concrete", 60),
             ("Кубики", "cubes_count", 60),
             ("Конусы", "cones_count", 60),
             ("Осадка", "slump", 60),
@@ -2287,6 +2292,11 @@ class ConcreteApp(tk.Tk):
                 self.style.theme_use(theme_name)
                 # Стабилизируем размеры кнопок для разных тем
                 self.configure_custom_styles()
+                # Убираем sizegrip и на новой теме
+                try:
+                    self.style.layout('TSizegrip', [])
+                except Exception:
+                    pass
         except Exception as e:
             messagebox.showerror("Ошибка темы", str(e))
 
