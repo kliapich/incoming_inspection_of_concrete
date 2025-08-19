@@ -88,7 +88,7 @@ class TelegramBotService:
 
     # Conversation states
     (ACTION, ORG, OBJ, CLASS, FROST, WATER, ELEMENT, SUPPLIER, PASSPORT,
-     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE, SEND_ACT) = range(20)
+     CUBES, CONES, SLUMP, VOLUME, TEMP, TEMP_MEAS, EXECUTOR, ACT, REQUEST, DATE, SEND_ACT, SEND_REQ) = range(21)
 
     def __init__(self, token: str, db_path: str = 'concrete.db'):
         self.token = token
@@ -655,12 +655,14 @@ class TelegramBotService:
                             'phone': construction_data.get('phone', '') or ''
                         }
                     }
-                    if not os.path.exists(template_file):
-                        await query.message.reply_text(f"Шаблон не найден: {template_file}")
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    template_path = os.path.join(base_dir, template_file)
+                    if not os.path.exists(template_path):
+                        await query.message.reply_text(f"Шаблон не найден: {template_path}")
                         return False
                     with tempfile.TemporaryDirectory() as tmpdir:
                         out_path = os.path.join(tmpdir, filename)
-                        doc = DocxTemplate(template_file)
+                        doc = DocxTemplate(template_path)
                         doc.render(context_tpl)
                         doc.save(out_path)
                         with open(out_path, 'rb') as f:
@@ -713,7 +715,7 @@ class TelegramBotService:
                     CallbackQueryHandler(skip_selected, pattern=r"^SKIP:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, date_input)
                 ],
-                self.SEND_ACT: [CallbackQueryHandler(send_act_choice, pattern=r"^SEND_ACT:")],
+                self.SEND_ACT: [CallbackQueryHandler(send_act_choice, pattern=r"^SEND:")],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
             allow_reentry=True,
