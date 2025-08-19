@@ -589,7 +589,7 @@ class ConcreteApp(tk.Tk):
     def add_organization(self):
         dialog = tk.Toplevel(self)
         dialog.title("Добавить организацию")
-        dialog.geometry("270x150")
+        dialog.geometry("280x170")
         
         fields = [
             ("Название:", "name"),
@@ -644,7 +644,7 @@ class ConcreteApp(tk.Tk):
         
         dialog = tk.Toplevel(self)
         dialog.title("Редактировать организацию")
-        dialog.geometry("270x150")
+        dialog.geometry("280x170")
         
         fields = [
             ("Название:", "name", org_data[0]),
@@ -682,7 +682,7 @@ class ConcreteApp(tk.Tk):
             
         dialog = tk.Toplevel(self)
         dialog.title("Добавить объект")
-        dialog.geometry("210x110")
+        dialog.geometry("220x130")
         
         fields = [
             ("Название:", "name"),
@@ -735,7 +735,7 @@ class ConcreteApp(tk.Tk):
         
         dialog = tk.Toplevel(self)
         dialog.title("Редактировать объект")
-        dialog.geometry("210x110")
+        dialog.geometry("220x130")
         
         fields = [
             ("Название:", "name", obj_data[0]),
@@ -1116,7 +1116,11 @@ class ConcreteApp(tk.Tk):
                     'supplier': construction_data.get('supplier', '') or '',
                     'passport': construction_data.get('concrete_passport', '') or '',
                     'volume': construction_data.get('volume_concrete', '') or '',
-                    
+                    'cubes': construction_data.get('cubes_count', '') or '',
+                    'cones': construction_data.get('cones_count', '') or '',
+                    'slump': construction_data.get('slump', '') or '',
+                    'temp': construction_data.get('temperature', '') or '',
+                    'temp_measurements': construction_data.get('temp_measurements', '') or '',
                     'act': construction_data.get('act_number', '') or '',
                     'request': construction_data.get('request_number', '') or '',
                     'invoice': construction_data.get('invoice', '') or '' 
