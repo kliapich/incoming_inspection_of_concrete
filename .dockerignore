@@ -1,0 +1,43 @@
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Переменные окружения
+.env
+.env.local
+.env.production
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Временные файлы
+*.tmp
+*.temp
+*.log
+
+# Тестовые файлы
+test_*.py
+*_test.py
+
+# Документация
+*.md
+docs/
+
+# Другие
+.DS_Store
+Thumbs.db
